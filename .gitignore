@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+!app/build/outputs/apk/debug/app-debug.apk
+
+# Local config (SDK paths, tokens)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+*.class
+
+# Logs
+*.log

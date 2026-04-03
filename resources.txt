@@ -1,0 +1,4 @@
+https://wearables.developer.meta.com/docs/getting-started-toolkit/
+https://developers.meta.com/blog/introducing-meta-wearables-device-access-toolkit/
+https://github.com/facebook/meta-wearables-dat-android
+
