@@ -10,10 +10,16 @@ android {
 
     defaultConfig {
         applicationId = "com.metavision.glassreader"
-        minSdk = 26
+        minSdk = 29
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        // Developer Mode on the glasses allows "0" for both credentials.
+        // Replace with real APPLICATION_ID / CLIENT_TOKEN from the Wearables
+        // Developer Center before distributing the app.
+        manifestPlaceholders["mwdat_application_id"] = "0"
+        manifestPlaceholders["mwdat_client_token"] = "0"
     }
 
     buildTypes {
@@ -50,5 +56,8 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.core.ktx)
+    implementation(libs.mwdat.core)
+    implementation(libs.mwdat.display)
+    implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.compose.ui.tooling)
 }

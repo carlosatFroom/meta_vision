@@ -30,11 +30,13 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -54,6 +56,8 @@ class MainActivity : ComponentActivity() {
     private var hasNotificationAccess by mutableStateOf(false)
     private var hasBluetoothPermission by mutableStateOf(false)
     private var hasContactsPermission by mutableStateOf(false)
+    private var showSettings by mutableStateOf(false)
+    private var showSources by mutableStateOf(false)
 
     private val bluetoothPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -71,14 +75,39 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    GlassReaderScreen(
-                        hasNotificationAccess = hasNotificationAccess,
-                        hasBluetoothPermission = hasBluetoothPermission,
-                        hasContactsPermission = hasContactsPermission,
-                        onOpenNotificationSettings = { openNotificationListenerSettings() },
-                        onRequestBluetooth = { requestBluetoothPermission() },
-                        onRequestContacts = { requestContactsPermission() },
-                    )
+                    when {
+                        showSources -> {
+                            NotificationSourcesScreen(
+                                context = this@MainActivity,
+                                onBack = { showSources = false },
+                                onRescan = { SmsNotificationListener.rescan() },
+                            )
+                        }
+                        showSettings -> {
+                            val displayState by DisplaySessionManager.connectionState.collectAsState()
+                            SettingsScreen(
+                                onBack = { showSettings = false },
+                                onSendTestCard = { DisplaySessionManager.sendTestCard() },
+                                onUpdate = { CardSettingsHolder.update(this@MainActivity, it) },
+                                settings = CardSettingsHolder.settings,
+                                displayReady = displayState ==
+                                    DisplaySessionManager.ConnectionState.DISPLAY_READY,
+                                onOpenSources = { showSources = true },
+                            )
+                        }
+                        else -> {
+                            GlassReaderScreen(
+                                hasNotificationAccess = hasNotificationAccess,
+                                hasBluetoothPermission = hasBluetoothPermission,
+                                hasContactsPermission = hasContactsPermission,
+                                onOpenNotificationSettings = { openNotificationListenerSettings() },
+                                onRequestBluetooth = { requestBluetoothPermission() },
+                                onRequestContacts = { requestContactsPermission() },
+                                onConnectGlasses = { DisplaySessionManager.connect(this@MainActivity) },
+                                onOpenSettings = { showSettings = true },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -120,23 +149,36 @@ fun GlassReaderScreen(
     onOpenNotificationSettings: () -> Unit,
     onRequestBluetooth: () -> Unit,
     onRequestContacts: () -> Unit,
+    onConnectGlasses: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
+    val displayState by DisplaySessionManager.connectionState.collectAsState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(20.dp)
     ) {
-        Text(
-            text = "GlassReader",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = "SMS to glasses via TTS",
-            fontSize = 14.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text(
+                    text = "GlassReader",
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = "SMS to glasses via TTS + display",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(onClick = onOpenSettings) { Text("Settings") }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -170,6 +212,51 @@ fun GlassReaderScreen(
                     enabled = hasNotificationAccess && hasBluetoothPermission &&
                         GlassReaderState.isTtsReady,
                 )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Glasses display connection
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Glasses Display", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        displayStateLabel(displayState),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = onConnectGlasses,
+                    enabled = displayState != DisplaySessionManager.ConnectionState.CONNECTING &&
+                        displayState != DisplaySessionManager.ConnectionState.DISPLAY_READY,
+                    modifier = Modifier.height(40.dp),
+                    contentPadding = ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(
+                        when (displayState) {
+                            DisplaySessionManager.ConnectionState.UNREGISTERED -> "Register"
+                            DisplaySessionManager.ConnectionState.REGISTERED,
+                            DisplaySessionManager.ConnectionState.FAILED -> "Connect"
+                            DisplaySessionManager.ConnectionState.CONNECTING -> "Connecting…"
+                            DisplaySessionManager.ConnectionState.DISPLAY_READY -> "Connected"
+                        },
+                        fontSize = 12.sp,
+                    )
+                }
             }
         }
 
@@ -211,6 +298,10 @@ fun GlassReaderScreen(
         }
         StatusRow("TTS Engine", GlassReaderState.isTtsReady)
         StatusRow("Listener Connected", GlassReaderState.isListenerConnected)
+        StatusRow(
+            "Glasses Display",
+            displayState == DisplaySessionManager.ConnectionState.DISPLAY_READY,
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -235,6 +326,15 @@ fun GlassReaderScreen(
             }
         }
     }
+}
+
+@Composable
+private fun displayStateLabel(state: DisplaySessionManager.ConnectionState): String = when (state) {
+    DisplaySessionManager.ConnectionState.UNREGISTERED -> "Not registered with Meta AI"
+    DisplaySessionManager.ConnectionState.REGISTERED -> "Registered — tap Connect"
+    DisplaySessionManager.ConnectionState.CONNECTING -> "Starting session…"
+    DisplaySessionManager.ConnectionState.DISPLAY_READY -> "Ready — cards will appear"
+    DisplaySessionManager.ConnectionState.FAILED -> "Connection failed — retry"
 }
 
 @Composable

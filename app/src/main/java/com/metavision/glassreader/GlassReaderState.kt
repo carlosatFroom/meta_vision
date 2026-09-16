@@ -13,6 +13,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.LinkedBlockingQueue
 
@@ -34,6 +38,7 @@ object GlassReaderState {
     private var tts: TextToSpeech? = null
     private var audioManager: AudioManager? = null
     private val messageQueue = LinkedBlockingQueue<SmsMessage>()
+    private val displayScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun initialize(context: Context) {
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -71,6 +76,15 @@ object GlassReaderState {
         recentMessages.add(0, message)
         if (recentMessages.size > MAX_HISTORY) {
             recentMessages.removeRange(MAX_HISTORY, recentMessages.size)
+        }
+
+        // Push to the glasses display when available — parallel to TTS so the
+        // wearer both sees the card and hears it spoken.
+        if (isEnabled &&
+            DisplaySessionManager.connectionState.value ==
+                DisplaySessionManager.ConnectionState.DISPLAY_READY
+        ) {
+            displayScope.launch { DisplaySessionManager.showMessage(message) }
         }
 
         if (isEnabled && isTtsReady) {
