@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+<meta name="mrbd-web-app-capable" content="yes">
+<title>Starfield</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #start {
+    position: fixed; inset: 0; margin: auto; width: 260px; height: 72px;
+    font: 600 24px system-ui, sans-serif; color: #fff; background: #000;
+    border: 2px solid #8cf; border-radius: 36px;
+  }
+  #start:focus { outline: 3px solid #fff; outline-offset: 4px; }
+  #hud {
+    position: fixed; left: 12px; bottom: 12px; display: none;
+    font: 16px ui-monospace, monospace; color: #8cf; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<button id="start" autofocus>Engage</button>
+<div id="hud"></div>
+<script>
+// Tuning. Axis signs are guesses until verified on hardware — flip with the HUD (ArrowUp) open.
+const YAW_SIGN = -1;            // verified on glasses: alpha decreases when turning head left
+const PITCH_SIGN = 1;
+const STEER_RATE = 1.5;         // how fast travel direction follows gaze (1/s)
+const CRUISE_SPEED = 60;        // world units per second
+const WARP_SPEED = 900;
+const WARP_DECAY = 1.2;         // warp fades out over ~1/decay seconds
+const WARP_ACCEL_THRESHOLD = 4; // m/s² of linear acceleration that triggers warp
+const STAR_COUNT = 700;
+const FIELD = 600;              // stars live in a cube of ±FIELD around the camera
+
+const canvas = document.getElementById('sky');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('start');
+const hud = document.getElementById('hud');
+
+let W, H, focal;
+function resize() {
+  W = canvas.width = innerWidth;
+  H = canvas.height = innerHeight;
+  focal = W * 0.9;
+}
+addEventListener('resize', resize);
+resize();
+
+const stars = Array.from({ length: STAR_COUNT }, () => ({
+  x: (Math.random() * 2 - 1) * FIELD,
+  y: (Math.random() * 2 - 1) * FIELD,
+  z: (Math.random() * 2 - 1) * FIELD,
+}));
+
+const head = { yaw: 0, pitch: 0 };      // where you look (radians, left/up positive)
+const travel = { yaw: 0, pitch: 0 };    // where you fly; eases toward head
+const base = { alpha: null, beta: null };
+let warp = 0;                            // 0..1
+let sensorsLive = false;
+let raw = { alpha: 0, beta: 0, gamma: 0, acc: 0 };
+let prevGravity = null;
+
+const DEG = Math.PI / 180;
+const wrapDeg = d => ((d + 540) % 360) - 180;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function onOrientation(e) {
+  if (e.alpha == null) return;
+  sensorsLive = true;
+  raw.alpha = e.alpha; raw.beta = e.beta; raw.gamma = e.gamma;
+  if (base.alpha == null) recenter();
+  head.yaw = YAW_SIGN * wrapDeg(e.alpha - base.alpha) * DEG;
+  head.pitch = clamp(PITCH_SIGN * (e.beta - base.beta), -60, 60) * DEG;
+}
+
+function onMotion(e) {
+  let a = e.acceleration;
+  if (!a || a.x == null) {
+    // No gravity-free acceleration: high-pass the gravity-included reading instead.
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x == null) return;
+    if (!prevGravity) prevGravity = { x: g.x, y: g.y, z: g.z };
+    for (const k of ['x', 'y', 'z']) prevGravity[k] += (g[k] - prevGravity[k]) * 0.1;
+    a = { x: g.x - prevGravity.x, y: g.y - prevGravity.y, z: g.z - prevGravity.z };
+  }
+  raw.acc = Math.hypot(a.x, a.y, a.z);
+  if (raw.acc > WARP_ACCEL_THRESHOLD) engageWarp();
+}
+
+function recenter() {
+  base.alpha = raw.alpha;
+  base.beta = raw.beta;
+  travel.yaw = travel.pitch = 0;
+}
+
+function engageWarp() { warp = 1; }
+
+async function start() {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      await DeviceOrientationEvent.requestPermission();
+    }
+    if (typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function') {
+      await DeviceMotionEvent.requestPermission();
+    }
+  } catch (err) {
+    console.warn('motion permission failed, keyboard only', err);
+  }
+  addEventListener('deviceorientation', onOrientation);
+  addEventListener('devicemotion', onMotion);
+  startBtn.remove();
+  requestAnimationFrame(frame);
+}
+startBtn.addEventListener('click', start);
+
+addEventListener('keydown', e => {
+  if (startBtn.isConnected) return;
+  const step = 8 * DEG;
+  switch (e.key) {
+    case 'Enter': case ' ': engageWarp(); break;
+    case 'ArrowUp':
+      if (sensorsLive) hud.style.display = hud.style.display === 'block' ? 'none' : 'block';
+      else head.pitch = clamp(head.pitch + step, -60 * DEG, 60 * DEG);
+      break;
+    case 'ArrowDown':
+      if (sensorsLive) recenter();
+      else head.pitch = clamp(head.pitch - step, -60 * DEG, 60 * DEG);
+      break;
+    case 'ArrowLeft': if (!sensorsLive) head.yaw += step; break;
+    case 'ArrowRight': if (!sensorsLive) head.yaw -= step; break;
+    default: return;
+  }
+  e.preventDefault();
+});
+
+// Forward vector for yaw ψ (left positive) and pitch θ (up positive); x right, y up, z ahead.
+function dir(yaw, pitch) {
+  return { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+}
+
+// World → view: undo head yaw, then head pitch. Returns screen point or null if behind.
+function project(x, y, z, cy, sy, cp, sp) {
+  const x1 = x * cy + z * sy;
+  const z1 = -x * sy + z * cy;
+  const y2 = y * cp - z1 * sp;
+  const z2 = y * sp + z1 * cp;
+  if (z2 < 15) return null;
+  return { sx: W / 2 + (x1 / z2) * focal, sy: H / 2 - (y2 / z2) * focal, z: z2 };
+}
+
+const wrap = v => v > FIELD ? v - 2 * FIELD : v < -FIELD ? v + 2 * FIELD : v;
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+
+  const k = 1 - Math.exp(-STEER_RATE * dt);
+  travel.yaw += wrapDeg((head.yaw - travel.yaw) / DEG) * DEG * k;
+  travel.pitch += (head.pitch - travel.pitch) * k;
+  warp = Math.max(0, warp - WARP_DECAY * dt);
+
+  const speed = CRUISE_SPEED + (WARP_SPEED - CRUISE_SPEED) * warp * warp;
+  const v = dir(travel.yaw, travel.pitch);
+  const dx = v.x * speed * dt, dy = v.y * speed * dt, dz = v.z * speed * dt;
+  const trail = 0.02 + 0.1 * warp; // seconds of motion drawn as a streak
+
+  const cy = Math.cos(head.yaw), sy = Math.sin(head.yaw);
+  const cp = Math.cos(head.pitch), sp = Math.sin(head.pitch);
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.lineCap = 'round';
+
+  for (const s of stars) {
+    s.x = wrap(s.x - dx); s.y = wrap(s.y - dy); s.z = wrap(s.z - dz);
+    const head_ = project(s.x, s.y, s.z, cy, sy, cp, sp);
+    if (!head_) continue;
+    const tail = project(s.x + v.x * speed * trail, s.y + v.y * speed * trail, s.z + v.z * speed * trail,
+                         cy, sy, cp, sp) || head_;
+    const near = 1 - head_.z / (FIELD * 1.7);
+    const bright = Math.round(120 + 135 * near);
+    ctx.strokeStyle = `rgb(${bright - warp * 60},${bright},255)`;
+    ctx.lineWidth = 0.8 + 2.4 * near;
+    ctx.beginPath();
+    ctx.moveTo(tail.sx, tail.sy);
+    ctx.lineTo(head_.sx + 0.1, head_.sy);
+    ctx.stroke();
+  }
+
+  if (hud.style.display === 'block') {
+    hud.textContent =
+      `alpha ${raw.alpha.toFixed(0).padStart(4)}  beta ${raw.beta.toFixed(0).padStart(4)}  gamma ${raw.gamma.toFixed(0).padStart(4)}\n` +
+      `accel ${raw.acc.toFixed(1).padStart(5)}  warp ${warp.toFixed(2)}`;
+  }
+  requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
