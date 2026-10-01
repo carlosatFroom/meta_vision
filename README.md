@@ -150,6 +150,62 @@ The Ray-Ban Display is an additive-light waveguide — it can only brighten, nev
 - **`INTERNET` permission is now required** by the DAT SDK for its transport; SMS content itself never leaves the device over it
 - **Contacts are still read locally** via `ContactsContract` — never uploaded
 
+## Starfield Web App
+
+A separate, standalone experiment in `webapp/starfield/index.html`: a starfield that flies toward you on the **Meta Ray-Ban Display** and steers with your head. Unlike the SMS card, it is a [Web App](https://wearables.developer.meta.com/docs/develop/webapps) — plain HTML/JS that runs on the glasses themselves. The Android app plays no part in it.
+
+### How it works
+
+```
+DeviceOrientationEvent (alpha/beta)
+    │  head yaw/pitch relative to the calibrated "straight ahead"
+    ▼
+Camera looks where you look (stars stay fixed in space)
+    │  travel direction eases toward your gaze over ~2 s
+    ▼
+DeviceMotionEvent linear acceleration
+    │  a sudden jolt above the threshold
+    ▼
+Warp — streaks stretch Star Trek style, then fade over ~1 s
+```
+
+Black renders transparent on the additive display, so only the stars show over the real world.
+
+### Controls
+
+| Input | Action |
+|-------|--------|
+| Pinch "Engage" | Grant motion permission and start |
+| Turn head | Look around; travel bends toward your gaze |
+| Sudden head jolt, or pinch | Warp |
+| Swipe down (ArrowDown) | Recenter "straight ahead" |
+| Swipe up (ArrowUp) | Toggle the raw sensor HUD |
+
+In a desktop browser without sensors, the arrow keys steer and Space/Enter warps.
+
+### Tuning
+
+Constants at the top of the script: `YAW_SIGN` / `PITCH_SIGN` (yaw is verified as `-1` on the glasses; pitch is unverified), `STEER_RATE`, `CRUISE_SPEED`, `WARP_SPEED`, `WARP_DECAY`, `WARP_ACCEL_THRESHOLD` (m/s²), `STAR_COUNT`, `FIELD`.
+
+### Install on the glasses
+
+1. Enable **Developer Mode** in the Meta AI app (see Setup above).
+2. Host `index.html` at a public **HTTPS** URL — the glasses reject HTTP and local/LAN addresses.
+3. Register it with the Meta AI app via the add-Web-App deep link, either as a QR code or over adb with the phone connected:
+   ```bash
+   adb shell am start -a android.intent.action.VIEW \
+     -d 'fb-viewapp://web_app_deep_link?appName=Starfield&appUrl=<url-encoded HTTPS URL>'
+   ```
+   The connect screen may look unresponsive; registration still succeeds if `adb logcat` shows `WebAppManager: Successfully created dev mode web app`. Firing it again may add a duplicate entry, removable under App connections.
+4. On the glasses, open **Starfield** from the app list.
+
+After editing, re-upload the file to the same URL — no re-registration needed. Close and reopen the app on the glasses if it shows a cached copy.
+
+### Limitations
+
+- There is no way to launch a Web App on the glasses from the phone: the Meta AI app only exposes add/manage deep links, and the DAT SDK drives native display content, not Web Apps.
+- The panel refreshes at 30 Hz; the effect is drawn with a 2D canvas.
+
 ## License
 
 Personal use. Not affiliated with Meta.
