@@ -34,10 +34,13 @@ class SmsNotificationListener : NotificationListenerService() {
         if (!NotificationSourceStore.isEnabled(pkg)) return
 
         val extras = sbn.notification.extras
-        val rawSender = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Unknown"
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
-            ?: return
+        val parsed = SmsNotificationParser.parse(
+            title = extras.getCharSequence(Notification.EXTRA_TITLE),
+            text = extras.getCharSequence(Notification.EXTRA_TEXT),
+            bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
+        ) ?: return
+        val rawSender = parsed.sender
+        val text = parsed.body
 
         // Skip summary/group notifications
         if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
